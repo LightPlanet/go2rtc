@@ -14,19 +14,21 @@ import (
 	"github.com/pion/webrtc/v4"
 )
 
+// WHIP Consumer ------------------------------------------------------------------------
+
 type whipConsumer struct {
 	core.Connection
 
-	pc          *webrtc.PeerConnection
-	videoTrack  *webrtc.TrackLocalStaticRTP
-	resourceURL string
+	PeerConn    *webrtc.PeerConnection
+	VideoTrack  *webrtc.TrackLocalStaticRTP
+	ResourceURL string
 }
 
 func (self *whipConsumer) AddTrack(media *core.Media, codec *core.Codec, track *core.Receiver) error {
 	sender := core.NewSender(media, codec)
 	sender.Handler = func(packet *rtp.Packet) {
-		if self.videoTrack != nil {
-			_ = self.videoTrack.WriteRTP(packet)
+		if self.VideoTrack != nil {
+			_ = self.VideoTrack.WriteRTP(packet)
 		}
 	}
 	sender.HandleRTP(track)
@@ -35,8 +37,8 @@ func (self *whipConsumer) AddTrack(media *core.Media, codec *core.Codec, track *
 }
 
 func (self *whipConsumer) Stop() error {
-	if self.resourceURL != "" {
-		req, err := http.NewRequest(http.MethodDelete, self.resourceURL, nil)
+	if self.ResourceURL != "" {
+		req, err := http.NewRequest(http.MethodDelete, self.ResourceURL, nil)
 		if err == nil {
 			client := &http.Client{Timeout: 5 * time.Second}
 			if resp, err := client.Do(req); err == nil {
@@ -44,49 +46,13 @@ func (self *whipConsumer) Stop() error {
 			}
 		}
 	}
-	if self.pc != nil {
-		_ = self.pc.Close()
+	if self.PeerConn != nil {
+		_ = self.PeerConn.Close()
 	}
 	return self.Connection.Stop()
 }
 
-func startWHIPStreamHandler(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		w.WriteHeader(http.StatusMethodNotAllowed)
-		return
-	}
-
-	deviceName := r.URL.Query().Get("name")
-	if deviceName == "" {
-		w.WriteHeader(http.StatusBadRequest)
-		return
-	}
-
-	if err := startWHIP(deviceName, stunAddress, remoteAddress); err != nil {
-		log.Error().Err(err).Caller().Send()
-		w.WriteHeader(http.StatusInternalServerError)
-		return
-	}
-}
-
-func stopWHIPStreamHandler(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		w.WriteHeader(http.StatusMethodNotAllowed)
-		return
-	}
-
-	devicePath := r.URL.Query().Get("video")
-	if devicePath == "" {
-		w.WriteHeader(http.StatusBadRequest)
-		return
-	}
-
-	if err := stopWHIP(devicePath); err != nil {
-		log.Error().Err(err).Caller().Send()
-		w.WriteHeader(http.StatusInternalServerError)
-		return
-	}
-}
+// Handlers -----------------------------------------------------------------------------
 
 func startWHIP(deviceName, stunAddr, remoteURL string) error {
 	stream := streams.Get(deviceName)
@@ -108,47 +74,47 @@ func startWHIP(deviceName, stunAddr, remoteURL string) error {
 		}
 	}
 
-	pc, err := webrtc.NewPeerConnection(config)
+	PeerConn, err := webrtc.NewPeerConnection(config)
 	if err != nil {
 		return fmt.Errorf("ошибка создания PeerConnection: %w", err)
 	}
 
-	pc.OnICEConnectionStateChange(func(state webrtc.ICEConnectionState) {
+	PeerConn.OnICEConnectionStateChange(func(state webrtc.ICEConnectionState) {
 		log.Info().Str("device", deviceName).Str("state", state.String()).Msg("[WebRTC] ICE состояние изменилось")
 	})
 
 	// go2rtc has RTP already
-	videoTrack, err := webrtc.NewTrackLocalStaticRTP(
+	VideoTrack, err := webrtc.NewTrackLocalStaticRTP(
 		webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypeH264},
 		"video",
 		"pion-whip",
 	)
 	if err != nil {
-		_ = pc.Close()
+		_ = PeerConn.Close()
 		return fmt.Errorf("ошибка создания видеотрека: %w", err)
 	}
 
-	if _, err = pc.AddTrack(videoTrack); err != nil {
-		_ = pc.Close()
+	if _, err = PeerConn.AddTrack(VideoTrack); err != nil {
+		_ = PeerConn.Close()
 		return fmt.Errorf("ошибка добавления трека: %w", err)
 	}
 
-	offer, err := pc.CreateOffer(nil)
+	offer, err := PeerConn.CreateOffer(nil)
 	if err != nil {
-		_ = pc.Close()
+		_ = PeerConn.Close()
 		return fmt.Errorf("ошибка CreateOffer: %w", err)
 	}
 
-	gatherComplete := webrtc.GatheringCompletePromise(pc)
-	if err = pc.SetLocalDescription(offer); err != nil {
-		_ = pc.Close()
+	gatherComplete := webrtc.GatheringCompletePromise(PeerConn)
+	if err = PeerConn.SetLocalDescription(offer); err != nil {
+		_ = PeerConn.Close()
 		return fmt.Errorf("ошибка SetLocalDescription: %w", err)
 	}
 	<-gatherComplete
 
-	req, err := http.NewRequest(http.MethodPost, remoteURL, bytes.NewBufferString(pc.LocalDescription().SDP))
+	req, err := http.NewRequest(http.MethodPost, remoteURL, bytes.NewBufferString(PeerConn.LocalDescription().SDP))
 	if err != nil {
-		_ = pc.Close()
+		_ = PeerConn.Close()
 		return err
 	}
 	req.Header.Set("Content-Type", "application/sdp")
@@ -156,7 +122,7 @@ func startWHIP(deviceName, stunAddr, remoteURL string) error {
 	client := &http.Client{Timeout: 10 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
-		_ = pc.Close()
+		_ = PeerConn.Close()
 		return fmt.Errorf("ошибка отправки WHIP POST: %w", err)
 	}
 	defer resp.Body.Close()
@@ -165,23 +131,23 @@ func startWHIP(deviceName, stunAddr, remoteURL string) error {
 	log.Debug().Int("status", resp.StatusCode).Str("sdp", string(answerBytes)).Msg("[WHIP] Ответ сервера")
 
 	if resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusOK {
-		_ = pc.Close()
+		_ = PeerConn.Close()
 		return fmt.Errorf("удаленный сервер отклонил WHIP (%d): %s", resp.StatusCode, string(answerBytes))
 	}
 
-	if err = pc.SetRemoteDescription(webrtc.SessionDescription{
+	if err = PeerConn.SetRemoteDescription(webrtc.SessionDescription{
 		Type: webrtc.SDPTypeAnswer,
 		SDP:  string(answerBytes),
 	}); err != nil {
-		_ = pc.Close()
+		_ = PeerConn.Close()
 		return fmt.Errorf("ошибка SetRemoteDescription: %w", err)
 	}
 
-	var resourceURL string
+	var ResourceURL string
 	if loc := resp.Header.Get("Location"); loc != "" {
 		if base, err := url.Parse(remoteURL); err == nil {
 			if ref, err := url.Parse(loc); err == nil {
-				resourceURL = base.ResolveReference(ref).String()
+				ResourceURL = base.ResolveReference(ref).String()
 			}
 		}
 	}
@@ -190,17 +156,15 @@ func startWHIP(deviceName, stunAddr, remoteURL string) error {
 		Connection: core.Connection{
 			ID:         core.NewID(),
 			FormatName: "whip",
-			Medias: []*core.Media{
-				{
-					Kind:      core.KindVideo,
-					Direction: core.DirectionSendonly,
-					Codecs:    []*core.Codec{{Name: core.CodecH264}},
-				},
-			},
+			Medias: []*core.Media{{
+				Kind:      core.KindVideo,
+				Direction: core.DirectionSendonly,
+				Codecs:    []*core.Codec{{Name: core.CodecH264}},
+			}},
 		},
-		pc:          pc,
-		videoTrack:  videoTrack,
-		resourceURL: resourceURL,
+		PeerConn:    PeerConn,
+		VideoTrack:  VideoTrack,
+		ResourceURL: ResourceURL,
 	}
 
 	if err = stream.AddConsumer(cons); err != nil {
