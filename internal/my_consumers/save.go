@@ -158,6 +158,7 @@ func startSaveHandler(w http.ResponseWriter, r *http.Request) {
 	deviceName := r.URL.Query().Get("name")
 	outputDir := r.URL.Query().Get("output-dir")
 	durStr := r.URL.Query().Get("duration")
+
 	if deviceName == "" || outputDir == "" {
 		w.WriteHeader(http.StatusBadRequest)
 		return
@@ -165,7 +166,6 @@ func startSaveHandler(w http.ResponseWriter, r *http.Request) {
 	if durStr == "" {
 		durStr = "30s"
 	}
-
 	dur, err := time.ParseDuration(durStr)
 	if err != nil {
 		log.Error().Err(err).Caller().Send()
@@ -186,6 +186,11 @@ func stopSaveHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	deviceName := r.URL.Query().Get("name")
+	if deviceName == "" {
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+
 	if err := stopSave(deviceName); err != nil {
 		log.Error().Err(err).Caller().Send()
 		w.WriteHeader(http.StatusInternalServerError)
