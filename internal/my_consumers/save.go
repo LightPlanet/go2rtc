@@ -110,7 +110,11 @@ func (self *saveConsumer) closeFileLocked() {
 		if err := self.File.Close(); err != nil {
 			log.Error().Err(err).Caller().Send()
 		}
-		go convertTsToMP4(self.File.Name())
+		go func() {
+			if err := convertTsToMP4(self.File.Name()); err != nil {
+				log.Error().Err(err).Caller().Send()
+			}
+		}()
 		self.File = nil
 	}
 }
