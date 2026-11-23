@@ -15,6 +15,7 @@ import (
 	"github.com/AlexxIT/go2rtc/internal/http"
 	"github.com/AlexxIT/go2rtc/internal/mjpeg"
 	"github.com/AlexxIT/go2rtc/internal/mp4"
+	"github.com/AlexxIT/go2rtc/internal/my_consumers"
 	"github.com/AlexxIT/go2rtc/internal/ngrok"
 	"github.com/AlexxIT/go2rtc/internal/pinggy"
 	"github.com/AlexxIT/go2rtc/internal/rtsp"
@@ -87,6 +88,7 @@ func main() {
 		{"ngrok", ngrok.Init},
 		{"pinggy", pinggy.Init},
 		{"srtp", srtp.Init},
+		{"my_consumers", my_consumers.Init},
 	}
 
 	for _, m := range modules {
