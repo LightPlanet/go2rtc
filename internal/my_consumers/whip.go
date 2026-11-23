@@ -57,14 +57,14 @@ func (self *whipConsumer) Stop() error {
 func startWHIP(deviceName, stunAddr, remoteURL string) error {
 	stream := streams.Get(deviceName)
 	if stream == nil {
-		return fmt.Errorf("no such stream: %s", deviceName)
+		return fmt.Errorf("No such stream: %s", deviceName)
 	}
 
 	whipMutex.Lock()
 	defer whipMutex.Unlock()
 
 	if _, ok := whipConsumers[deviceName]; ok {
-		return fmt.Errorf("whip already active for: %s", deviceName)
+		return fmt.Errorf("WHIP already active for: %s", deviceName)
 	}
 
 	config := webrtc.Configuration{}
@@ -76,11 +76,14 @@ func startWHIP(deviceName, stunAddr, remoteURL string) error {
 
 	PeerConn, err := webrtc.NewPeerConnection(config)
 	if err != nil {
-		return fmt.Errorf("ошибка создания PeerConnection: %w", err)
+		return fmt.Errorf("NewPeerConnection: %w", err)
 	}
 
 	PeerConn.OnICEConnectionStateChange(func(state webrtc.ICEConnectionState) {
-		log.Info().Str("device", deviceName).Str("state", state.String()).Msg("[WebRTC] ICE состояние изменилось")
+		log.Info().
+			Str("device", deviceName).
+			Str("state", state.String()).
+			Msg("[WebRTC] ICE состояние изменилось")
 	})
 
 	// go2rtc has RTP already
@@ -91,28 +94,30 @@ func startWHIP(deviceName, stunAddr, remoteURL string) error {
 	)
 	if err != nil {
 		_ = PeerConn.Close()
-		return fmt.Errorf("ошибка создания видеотрека: %w", err)
+		return fmt.Errorf("NewTrackLocalStaticRTP: %w", err)
 	}
 
 	if _, err = PeerConn.AddTrack(VideoTrack); err != nil {
 		_ = PeerConn.Close()
-		return fmt.Errorf("ошибка добавления трека: %w", err)
+		return fmt.Errorf("AddTrack: %w", err)
 	}
 
 	offer, err := PeerConn.CreateOffer(nil)
 	if err != nil {
 		_ = PeerConn.Close()
-		return fmt.Errorf("ошибка CreateOffer: %w", err)
+		return fmt.Errorf("CreateOffer: %w", err)
 	}
 
 	gatherComplete := webrtc.GatheringCompletePromise(PeerConn)
 	if err = PeerConn.SetLocalDescription(offer); err != nil {
 		_ = PeerConn.Close()
-		return fmt.Errorf("ошибка SetLocalDescription: %w", err)
+		return fmt.Errorf("SetLocalDescription: %w", err)
 	}
 	<-gatherComplete
 
-	req, err := http.NewRequest(http.MethodPost, remoteURL, bytes.NewBufferString(PeerConn.LocalDescription().SDP))
+	req, err := http.NewRequest(http.MethodPost,
+		remoteURL, bytes.NewBufferString(PeerConn.LocalDescription().SDP),
+	)
 	if err != nil {
 		_ = PeerConn.Close()
 		return err
@@ -123,16 +128,19 @@ func startWHIP(deviceName, stunAddr, remoteURL string) error {
 	resp, err := client.Do(req)
 	if err != nil {
 		_ = PeerConn.Close()
-		return fmt.Errorf("ошибка отправки WHIP POST: %w", err)
+		return fmt.Errorf("WHIP POST: %w", err)
 	}
 	defer resp.Body.Close()
 
 	answerBytes, _ := io.ReadAll(resp.Body)
-	log.Debug().Int("status", resp.StatusCode).Str("sdp", string(answerBytes)).Msg("[WHIP] Ответ сервера")
+	log.Debug().
+		Int("status", resp.StatusCode).
+		Str("sdp", string(answerBytes)).
+		Msg("[WHIP] Server answer")
 
 	if resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusOK {
 		_ = PeerConn.Close()
-		return fmt.Errorf("удаленный сервер отклонил WHIP (%d): %s", resp.StatusCode, string(answerBytes))
+		return fmt.Errorf("WHIP rejected (%d): %s", resp.StatusCode, string(answerBytes))
 	}
 
 	if err = PeerConn.SetRemoteDescription(webrtc.SessionDescription{
@@ -140,7 +148,7 @@ func startWHIP(deviceName, stunAddr, remoteURL string) error {
 		SDP:  string(answerBytes),
 	}); err != nil {
 		_ = PeerConn.Close()
-		return fmt.Errorf("ошибка SetRemoteDescription: %w", err)
+		return fmt.Errorf("SetRemoteDescription: %w", err)
 	}
 
 	var ResourceURL string
@@ -179,7 +187,7 @@ func startWHIP(deviceName, stunAddr, remoteURL string) error {
 func stopWHIP(deviceName string) error {
 	stream := streams.Get(deviceName)
 	if stream == nil {
-		return fmt.Errorf("no such stream: %s", deviceName)
+		return fmt.Errorf("No such stream: %s", deviceName)
 	}
 
 	whipMutex.Lock()
@@ -190,7 +198,7 @@ func stopWHIP(deviceName string) error {
 	whipMutex.Unlock()
 
 	if !ok {
-		return fmt.Errorf("whip is not active for: %s", deviceName)
+		return fmt.Errorf("WHIP is not active for: %s", deviceName)
 	}
 
 	stream.RemoveConsumer(cons)
